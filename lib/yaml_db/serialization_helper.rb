@@ -64,6 +64,7 @@ module YamlDb
             load_documents(io, truncate)
           end
         end
+        reload_sequences!
       end
 
       def self.truncate_table(table)
@@ -78,7 +79,6 @@ module YamlDb
         column_names = data['columns']
         truncate_table(table) if truncate
         load_records(table, column_names, data['records'])
-        reset_pk_sequence!(table)
       end
 
       def self.load_records(table, column_names, records)
@@ -90,6 +90,15 @@ module YamlDb
         records.each do |record|
           quoted_values = record.map{|c| ActiveRecord::Base.connection.quote(c)}.join(',')
           ActiveRecord::Base.connection.execute("INSERT INTO #{quoted_table_name} (#{quoted_column_names}) VALUES (#{quoted_values})")
+        end
+      end
+
+      def self.alter_pk_sequence(table, counter = nil)
+        pk_sequence = ActiveRecord::Base.connection.pk_and_sequence_for(table)
+        if pk_sequence
+          pk_sequence_column = [pk_sequence[1].schema, pk_sequence[1].identifier].join('.')
+          total_items = counter || Dump.table_record_count(table)
+          ActiveRecord::Base.connection.execute(sprintf('ALTER SEQUENCE %s RESTART WITH %s;', pk_sequence_column, total_items + 1))
         end
       end
 
@@ -221,3 +230,4 @@ module YamlDb
     end
   end
 end
+
