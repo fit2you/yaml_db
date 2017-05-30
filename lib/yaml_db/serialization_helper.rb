@@ -60,7 +60,9 @@ module YamlDb
     class Load
       def self.load(io, truncate = true)
         ActiveRecord::Base.connection.transaction do
-          load_documents(io, truncate)
+          Utils.constraints do
+            load_documents(io, truncate)
+          end
         end
       end
 
@@ -74,11 +76,9 @@ module YamlDb
 
       def self.load_table(table, data, truncate = true)
         column_names = data['columns']
-        Utils.constraints do
-          truncate_table(table) if truncate
-          load_records(table, column_names, data['records'])
-          reset_pk_sequence!(table)
-        end
+        truncate_table(table) if truncate
+        load_records(table, column_names, data['records'])
+        reset_pk_sequence!(table)
       end
 
       def self.load_records(table, column_names, records)
@@ -104,25 +104,11 @@ module YamlDb
     module Utils
 
       def self.constraints
-        drop_constraints
+        drop_constarints_queries = ActiveRecord::Base.connection.execute("SELECT 'ALTER TABLE '||nspname||'.'||relname||' DROP CONSTRAINT '||conname||';' FROM pg_constraint INNER JOIN pg_class ON conrelid=pg_class.oid INNER JOIN pg_namespace ON pg_namespace.oid=pg_class.relnamespace ORDER BY CASE WHEN contype='f' THEN 0 ELSE 1 END,contype,nspname,relname,conname").values.flatten
+        create_constraints_queries = ActiveRecord::Base.connection.execute("SELECT 'ALTER TABLE '||nspname||'.'||relname||' ADD CONSTRAINT '||conname||' '|| pg_get_constraintdef(pg_constraint.oid)||';' FROM pg_constraint INNER JOIN pg_class ON conrelid=pg_class.oid INNER JOIN pg_namespace ON pg_namespace.oid=pg_class.relnamespace ORDER BY CASE WHEN contype='f' THEN 0 ELSE 1 END DESC,contype DESC,nspname DESC,relname DESC,conname DESC;").values.flatten
+        drop_constarints_queries.each{|dcq| ActiveRecord::Base.connection.execute(dcq)}
         yield
-        create_constraints
-      end
-
-      def self.drop_constraints_queries
-        ActiveRecord::Base.connection.execute("SELECT 'ALTER TABLE '||nspname||'.'||relname||' DROP CONSTRAINT '||conname||';' FROM pg_constraint INNER JOIN pg_class ON conrelid=pg_class.oid INNER JOIN pg_namespace ON pg_namespace.oid=pg_class.relnamespace ORDER BY CASE WHEN contype='f' THEN 0 ELSE 1 END,contype,nspname,relname,conname").values.flatten
-      end
-
-      def self.drop_constraints
-        drop_constraints_queries.each{|dcq| ActiveRecord::Base.connection.execute(dcq)}
-      end
-
-      def self.create_constraints_queries
-        ActiveRecord::Base.connection.execute("SELECT 'ALTER TABLE '||nspname||'.'||relname||' ADD CONSTRAINT '||conname||' '|| pg_get_constraintdef(pg_constraint.oid)||';' FROM pg_constraint INNER JOIN pg_class ON conrelid=pg_class.oid INNER JOIN pg_namespace ON pg_namespace.oid=pg_class.relnamespace ORDER BY CASE WHEN contype='f' THEN 0 ELSE 1 END DESC,contype DESC,nspname DESC,relname DESC,conname DESC;").values.flatten
-      end
-
-      def self.create_constraints
-        create_constraints_queries.each{|ccq| ActiveRecord::Base.connection.execute(ccq)}
+        create_constraints_queries.each{|dcq| ActiveRecord::Base.connection.execute(dcq)}
       end
 
       def self.unhash(hash, keys)
